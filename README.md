@@ -1,6 +1,6 @@
 # Predictive Analysis using Reddit Comment Data and SparkML
 
-Big Data data project using Reddit comment data from October 2018 to January 2019 (15 features and 433,521,422 observations) to develop predictive models to identify whether or not a a post is `stickied` or contains a `no_follow` link. 
+Big Data project using Reddit comment data from October 2018 to January 2019 (15 features and 433,521,422 observations) to develop predictive models to identify whether or not a a post is `stickied` or contains a `no_follow` link. 
 
 * Stickied posts are posts that are highlighted and stay at the top of the subreddit (usually one or two posts)
 * Nofollow links are those that don't allow search engine bots to follow them. 
