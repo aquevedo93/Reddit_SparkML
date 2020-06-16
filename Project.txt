@@ -1,0 +1,264 @@
+Andrea Quevedo 
+PPOL 567- Final Project
+
+Introduction
+-------------
+
+Reddit comment data from October 2018 to January 2019 was used to develop predictive models to identify whether or not a a post is `stickied` or contains a `no_follow` link. Stickied posts are posts that are highlighted and stay at the top of the subreddit (usually one or two posts), while Nofollow links are those that don't allow search engine bots to follow them. Being classification problems, Logistic Regression, Random Forest, and Gradient Boosted Tree models were used including predictors reflecting post relevance, user involvement, and post characteristics. Spark was used throughout the different steps of the project given that it is performant in terms of running time and developer productivity (important since we are dealing with 500GB of data) and it enables iteration, which is essential to perform the machine learning tasks required in this assignment.
+
+
+
+Code
+----
+
+All code, including data cleaning, feature engineering, exploratory data analysis (EDA), modeling, and evaluation is included in the jupyter notebook `project_aq38.ipynb`. 
+
+
+
+Methods 
+-------
+
+* Initial Data Cleaning - After uploading the Reddit LZO files from the course's S3 bucket and converting them to a dataframe, I printed the schema and tallied the number of missing values per feature. The following features were the ones with missing values: 
+
+
+| Variable                      	| Missing Observations 	|
+|-------------------------------	|----------------------	|
+| archived                      	| 129,352,624          	|
+| author_cakeday                	| 474,710,486          	|
+| author_created_utc            	| 42,738,322           	|
+| author_flair_background_color 	| 323,529,952          	|
+| author_flair_css_class        	| 371,349,643          	|
+| author_flair_richtext         	| 42,737,313           	|
+| author_flair_template_id      	| 414,663,455          	|
+| author_flair_text             	| 368,524,948          	|
+| author_flair_text_color       	| 323,529,952          	|
+| author_flair_type             	| 42,737,313           	|
+| author_fullname               	| 42,737,313           	|
+| author_patreon_flair          	| 49,013,039           	|
+| collapsed_reason              	| 469,533,816          	|
+| distinguished                 	| 468,689,710          	|
+| removal_reason                	| 476,258,225          	|
+
+
+From these, I decided to drop the features containing more than 100,000,000 (100 million) missing observations in order to not significantly affect the sample size in the main analysis. From the remaining five features containing missing values, I decided to only keep `author_created_utc`. I dropped `author_flair_richtext`, `author_flair_type` and `author_patreon_flair` since I had already dropped most features related to flair, and I dropped `author_fullname` since we already have complete data on `author`. 
+
+I further inspected the remaining features containing no missing values in order to remove features that did not seem relevant for the analysis moving forward and to try and avoid overfitting, which occurs when the model corresponds too closely to a particular dataset. With this in mind, I dropped the following 11 features either because they were redundant with other features in the dataframe (e.g. gildings is redundant with gilded) or because they did not seem to contain essential/relevant information to predict our features of interest (`stickied` and `no_follow`): `can_mod_post`, `gildings`, `is_submitter`, `permalink`, `retrieved_on`, `subreddit_name_prefixed`, `subreddit_id`, `parent_id`, `link_id`, `id`, and `edited`. 
+
+Given that the remaining dataframe only included a feature with missing values (author_created_utc), I proceeded to drop missing values based on that variable (data= data.dropna(subset='author_created_utc')). All in all, I was able to remove missing values while retaining ~92% of the original data. 
+
+Lastly, I casted boolean variables (`stickied`,`no_follow`, `send_replies`, `collapsed`, and `can_gild`) to integers for easier processing by the algorithms to be employed further on. 
+
+
+* Feature Engineering - I created four features I believed would be important for the analysis: `post_char_len`, `weekday`, `hour_posted`, and `account active time`. 
+
+- `post_char_len`: Post length in characters calculated by taking the length of the `body` feature using the `length` function from pyspark.sql.functions. The values range from 0 to 33374 characters (0 characters is possible given that people can post in Reddit by just writing in the post title while leaving the body empty). 
+- `weekday`: After converting `created_utc` to TimestampType(), I created a user defined function (udf) that uses the datetime library to identify the day of the week each post was created in. The values range from 0-6 (Sunday- Saturday respectively). 
+- `hour_posted`: Using the `hour` function from pyspark.sql.functions, I extracted the time of the day each post was published from `created_utc`. The values range from 0-23 (equivalent to the number of hours in a day). 
+- `account active time`: After converting `author_created_utc` to TimestampType(), I used the `datediff` function from pyspark.sql.functions to calculate the number of days an author's account had been active from the time their account was created till the time a given post was published. The values range from 0 to 4985 days. 
+
+
+Following the creation of these variables, I proceeded to drop `body`, `author_created_utc`, and `created_utc`. 
+
+The finalized dataframe included 433,521,422 observations and the following 15 features: 
+
+ |-- author: string (nullable = true)
+ |-- can_gild: integer (nullable = true)
+ |-- collapsed: integer (nullable = true)
+ |-- controversiality: long (nullable = true)
+ |-- gilded: long (nullable = true)
+ |-- no_follow: integer (nullable = true)
+ |-- score: long (nullable = true)
+ |-- send_replies: integer (nullable = true)
+ |-- stickied: integer (nullable = true)
+ |-- subreddit: string (nullable = true)
+ |-- subreddit_type: string (nullable = true)
+ |-- post_char_len: integer (nullable = true)
+ |-- weekday: string (nullable = true)
+ |-- hour_posted: integer (nullable = true)
+ |-- account_active_time: integer (nullable = true)
+ 
+ 
+ * Exploratory Data Analysis (EDA) - To assess the finalized dataframe, I computed a number of tables and graphs to better understand the distribution of the different features within. 
+ 
+For the four continuous features, `gilded`, `score`, `post_char_len`, and `account_active_time`, I printed a summary statistics table depicting the total count, mean, standard deviation, and minimum and maximum values. To accompany this table, I printed a histogram to better visualize the distribution in the table. Given that converting the complete dataframe to pandas in order to graph would take a lot of memory, I decided to create graphs using a random sample of 1,000,000 (1 million) observations from the data. 
+
+For the categorical features (with more than two categories), `weekday`, `hour_posted`, `subreddit`, `subreddit_type`, and `author`, I created tables that display the number of observations per category in descending order (from highest to lowest count). For the features I was aware of the total number of categories, I created bar plots depicting their distribution (again, only plotting based on a random sample of 1 million observations). The bar plot for `weekday` looks very well distributed, with the day with the most posts published being Wednesday (this is consistent with the table showing the distribution for the complete dataframe); this was slightly surprising as I was expecting Friday, Saturday, and Sunday to have a higher count. The bar plot for `hour_posted` is also very insightful; we can see the number of posts decreasing from hour 0 to 9 (early morning hours), then increasing from 9 to 20 (working hours and early evening), and then decreasing again from 20 to 23 (later at night). For the features I was not fully aware of the number of categories, I counted the number of distinct observations/categories using the `countDistinct` function pyspark.sql.functions, resulting in the following counts: 
+
+count(DISTINCT subreddit_type)|
++------------------------------+
+|                             4
+
+|count(DISTINCT author)|
++----------------------+
+|              10017260|
+
+count(DISTINCT subreddit)|
++-------------------------+
+|                   221004|
+
+
+Given that the number of distinct authors exceeds 10 million and the number of subreddits exceeds 220 thousand, I decided not to include them as predictors in the machine learning models given that encoding them would result in 10 million and 220 thousand columns respectively and this would, in turn, result in memory issues in our cluster. 
+
+Lastly, for the binary variables, I created tables depicting the number of observations per category. For the sake of space, I will only display our two features of interest (target features) in this write-up (all other tables and graphs are displayed in the jupyter notebook).
+
+stickied |    count
++--------+---------+
+|       1|  2636044|
+|       0|430885378|
+
+no_follow |    count
++---------+---------+
+|        1|329713769|
+|        0|103807653|
+
+
+* Models - Because the problems of interest are both classification problems (predicting whether a given post is `stickied` or not and whether a given post has `no_follow` links or not), a logistic regression, random forest, and gradient boosted tree were used for the analysis, with the AUC being used to evaluate each model. 
+
+To build the pipeline for each model, I used StringIndexer, OneHotEncoderEstimator, VectorAssembler, and IndexToString from pyspark.ml.feature. StringIndexer was used to convert categorical (discrete) variables (including our target variable) into index columns. OneHotEncoderEstimator was then used to map categorical features, now represented as a label index, to a binary vector indicating the presence of a specific category (it creates a column for each category with 1s and 0s indicating the presence of a given category). The resulting vectors are then put together with the continuous variables in a VectorAssembler. IndexToString was used as a label converter in the pipeline to label indexes back to their actual labels. 
+
+- Classification Problem 1 
+
+	label: `stickied`
+	
+	categorical predictors: 
+		`no_follow`,
+		`subreddit_type`, 
+		`weekday`, 
+		`can_gild`, 
+		`collapsed`,  
+		`send_replies`, 
+		`controversiality`, 
+		`hour_posted`
+		
+	numerical predictors:  
+		`gilded`,
+		`score`, 
+		`post_char_len`,
+		`account_active_time`
+	
+	pipeline: 
+		pipeline_model = Pipeline(stages=[stringIndexer_label,
+		                               stringIndexer_no_follow,
+									   stringIndexer_subreddit_type,
+		                               stringIndexer_weekday,
+		                               stringIndexer_can_gild,
+		                               stringIndexer_collapsed,
+		                               stringIndexer_send_replies,
+		                               stringIndexer_controversiality,
+		                               stringIndexer_hour_posted,
+		                               encoder,
+		                               vectorAssembler_features, 
+		                               model, 
+		                               labelConverter])
+	
+- Classification Problem 2
+
+	label: `no_follow`
+	
+	categorical predictors:
+		`stickied`,
+		`subreddit_type`, 
+		`weekday`, 
+		`can_gild`, 
+		`collapsed`,  
+		`send_replies`, 
+		`controversiality`, 
+		`hour_posted`
+		
+	numerical predictors: 
+		`gilded`,
+		`score`, 
+		`post_char_len`,
+		`account_active_time`
+	
+	pipeline: 
+		pipeline_model = Pipeline(stages=[stringIndexer_label,
+		                               stringIndexer_stickied,
+									   stringIndexer_subreddit_type,
+		                               stringIndexer_weekday,
+		                               stringIndexer_can_gild,
+		                               stringIndexer_collapsed,
+		                               stringIndexer_send_replies,
+		                               stringIndexer_controversiality,
+		                               stringIndexer_hour_posted,
+		                               encoder,
+		                               vectorAssembler_features, 
+		                               model, 
+		                               labelConverter])
+									   
+
+`model` was replaced by either lr, rf, or gbt, indicating Logistic Regression, Random Forest, and Gradient Boosted Tree models from pyspark.ml.classification respectively. 
+	- lr = LogisticRegression(labelCol='label', featuresCol='features')
+	- rf = RandomForestClassifier(labelCol="label", featuresCol="features")
+	- gbt = GBTClassifier(labelCol="label", featuresCol="features", maxIter=15)
+	
+The variables chosen for the models can be divided between those explaining post relevance, user involvement, and post_characteristics as follows: 
+
+	- post relevance
+		`score`
+		`gilded`
+		`controversiality` (having a high number of up and down votes)
+		`subreddit_type`
+		`stickied` (whether moderators have made the post one of the two top posts on the subreddit's front page).
+		
+	- user involvement 
+		`account_active_time`
+		`post_char_length`
+		`send_replies` (whether the author has inbox replies enabled or disabled)
+		`hour_posted`
+		`weekday`
+		
+	- post characteristics 
+		`can_gild`
+		`no_follow` (different from Dofollow links, Nofollow links don't allow search engine bots to follow links)
+				
+
+When running these models, my hypothesis was that post relevance, user involvement, and post characteristics are good predictors for whether or not a post is `stickied` or has a `no_follow` link.  
+
+
+
+Results 
+-------
+
+After running the models, I evaluated them using BinaryClassificationEvaluator from pyspark.ml.evaluation to obtain their AUC scores. 
+
+
+* Using the same predictors, the AUC scores for the models predicting `stickied` were as follows: 
+	- Logistic Regression: 0.5039673804143159
+	- Random Forest: 0.5
+	- Gradient Boosted Tree: 0.5075491010751847
+
+
+* Using the same predictors, the AUC scores for the models predicting `no_follow` were as follows: 
+	- Logistic Regression: 0.6690379212605336
+	- Random Forest: 0.9233445119812705
+	- Gradient Boosted Tree: 0.9374747179379846
+	
+
+On the one hand, the models to predict `stickied` all have AUC scores of ~0.5, with the gradient boosted tree performing slightly better than the other two models. This means that the models are no better than randomly guessing whether or not a  post is `stickied` at the top of a subreddit's frontpage by the moderators. On the other hand, the models to predict `no_follow` have higher AUC scores, with the random forest and gradient boosted tree performing significantly better than the logistic regression. There are a few reasons why this could have happened:
+
+- As seen in the EDA tables above, there is more of a class imbalance in the `stickied` feature compared to `no_follow`. For the first binary classification problem (`stickied`), one class is present with a 163:1 ratio in the dataset, while in the second classification problem (`no_follow`), the ratio is 3:1. This means that when randomly splitting our training and test sets, the training set of a highly imbalanced target feature might not contain enough samples to learn the class, which will negatively affect the AUC score obtained (false positives are likely to increase, meaning that even if accuracy is high, precision will be rather low and the AUC will return a low score). Given that `stickied` is significantly more imbalanced than `no_follow`, when used as a target feature, it makes sense for all midels to have a lower AUC score. To combat class imbalance, we could either collect more data or oversample the minority class (using python’s imblearn module’s SMOTE function, for instance). 
+
+- Post relevance, user involvement and post characteristics are good predictors for whether or not a post has a `no_follow` link, but not for whether or not a post is `stickied`. While Nofollow links don’t allow search engine bots to follow your links, Dofollow links are an HTML attribute that is used to allow search bots to follow the links (this can significantly increase post/page performance) (SE Ranking). For instance, "Google takes notes of Dofollow links and figures how many users are linking to your page in order to get how really good the page is. The more Dofollow links you have, the more points you will get" (SE Ranking). On a reddit post asking whether Reddit posts count as Dofollow links, answers stated that upvotes after a certain point, the subreddit type, and number of subscribers are among the features that allow a Nofollow link become Dofollow, confirming my hypothesis. On the other hand, being highlighted by subreddit moderators, a stickied post is always the top post on the subreddit's front page, independent of votes and time since posting. Hence, we might need to use a different feature combination or different techniques (such as NLP) to better predict it. 
+
+- When predicting `no_follow`, the random forest and gradient boosted tree models could have produced a higher AUC score given that they emphasize feature selection (some features are weighed as being more important than others), they do not assume the model has a linear relationship, and they utilize ensemble learning (a random forest takes random samples, forms many decision trees, and then averages out the leaf nodes to get a clearer model). 
+
+
+
+
+Future Work
+------------
+
+Apart from collecting more data and dealing with class imbalance by over sampling the minority class, I would like to analyze the body of the text in order to classify the dataframe by subreddit. I would also make sure to run my analysis using a larger cluster (increasing the number of cores and the node size in order to boost speed and memory). Lastly, I would like to spend some time looking at the feature importance and hyperparameter tuning of each model as well as printing confusion matrices in order to evaluate the number of true positives, true negative, false positives, and false negatives. 
+
+
+
+References
+------------
+
+https://seranking.com/blog/the-true-value-of-dofollow-and-nofollow-links-for-seo/
+
+https://www.reddit.com/r/SEO/comments/6bv5to/do_reddit_posts_count_as_dofollow_links/ 
+
+https://towardsdatascience.com/is-random-forest-better-than-logistic-regression-a-comparison-7a0f068963e4
+
