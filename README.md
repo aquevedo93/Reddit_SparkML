@@ -16,6 +16,6 @@ Spark was used throughout the different steps of the project given that it is pe
   - Data Cleaning 
   - Exploratory Data Analysis 
   - Data Visualization 
-  - Machine Learning Models 
+  - Machine Learning Models for each classification problem
   
 * `Project.txt`: Writeup including analysis and future work
