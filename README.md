@@ -8,3 +8,14 @@ Big Data data project using Reddit comment data from October 2018 to January 201
 Being classification problems, **Logistic Regression**, **Random Forest**, and **Gradient Boosted Tree** models were used including predictors reflecting post relevance, user involvement, and post characteristics. 
 
 Spark was used throughout the different steps of the project given that it is performant in terms of running time and developer productivity (important since we are dealing with 500GB of data) and it enables iteration, which is essential to perform the machine learning tasks required in this assignment.
+
+
+## Files Included
+
+* `project_aq38.ipynb`: 
+  - Data Cleaning 
+  - Exploratory Data Analysis 
+  - Data Visualization 
+  - Machine Learning Models 
+  
+* `Project.txt`: Writeup including analysis and future work
